@@ -52,6 +52,7 @@ Verify all completed in the main thread; relaunch any that failed.
 Extract figures and tables as PNGs — crop them from the page images into FOLDER/figures_and_tables and reference them in the Markdown.
 Ignore running headers, page numbers, and mini-headers when converting.
 Finally, concatenate everything into FOLDER/paper.md.
+After concatenating, verify all image paths are relative to FOLDER (where paper.md lives), not to the subfolders where they were originally written. Fix any that aren't.
 
 5. Clean up by running `rm -r FOLDER/pages_png FOLDER/pages_md` — use exactly this command, no alternatives.
 Just replace FOLDER with the actual name.

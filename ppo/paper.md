@@ -27,11 +27,15 @@ $^1$ While DQN works well on game environments like the Arcade Learning Environm
 
 Policy gradient methods work by computing an estimator of the policy gradient and plugging it into a stochastic gradient ascent algorithm. The most commonly used gradient estimator has the form
 
-$$\hat{g} = \hat{\mathbb{E}}_t \Big[ \nabla_\theta \log \pi_\theta(a_t \mid s_t) \hat{A}_t \Big] \tag{1}$$
+$$
+\hat{g} = \hat{\mathbb{E}}_t \left[ \nabla_\theta \log \pi_\theta(a_t \mid s_t) \, \hat{A}_t \right] \tag{1}
+$$
 
 where $\pi_\theta$ is a stochastic policy and $\hat{A}_t$ is an estimator of the advantage function at timestep $t$. Here, the expectation $\hat{\mathbb{E}}_t[\ldots]$ indicates the empirical average over a finite batch of samples, in an algorithm that alternates between sampling and optimization. Implementations that use automatic differentiation software work by constructing an objective function whose gradient is the policy gradient estimator; the estimator $\hat{g}$ is obtained by differentiating the objective
 
-$$L^{PG}(\theta) = \hat{\mathbb{E}}_t \Big[ \log \pi_\theta(a_t \mid s_t) \hat{A}_t \Big]. \tag{2}$$
+$$
+L^{\mathrm{PG}}(\theta) = \hat{\mathbb{E}}_t \left[ \log \pi_\theta(a_t \mid s_t) \, \hat{A}_t \right]. \tag{2}
+$$
 
 While it is appealing to perform multiple steps of optimization on this loss $L^{PG}$ using the same trajectory, doing so is not well-justified, and empirically it often leads to destructively large policy updates (see Section 6.1; results are not shown but were similar or worse than the "no clipping or penalty" setting).
 
@@ -39,37 +43,47 @@ While it is appealing to perform multiple steps of optimization on this loss $L^
 
 In TRPO [Sch+15b], an objective function (the "surrogate" objective) is maximized subject to a constraint on the size of the policy update. Specifically,
 
-$$\underset{\theta}{\text{maximize}} \quad \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)} \hat{A}_t \right] \tag{3}$$
+$$
+\underset{\theta}{\operatorname{maximize}} \quad \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)} \, \hat{A}_t \right] \tag{3}
+$$
 
-$$\text{subject to} \quad \hat{\mathbb{E}}_t [\text{KL}[\pi_{\theta_{\text{old}}}(\cdot \mid s_t), \pi_\theta(\cdot \mid s_t)]] \leq \delta. \tag{4}$$
+$$
+\operatorname{subject\;to} \quad \hat{\mathbb{E}}_t \left[ \mathrm{KL} \left[ \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t),\, \pi_\theta(\cdot \mid s_t) \right] \right] \leq \delta. \tag{4}
+$$
 
 Here, $\theta_{\text{old}}$ is the vector of policy parameters before the update. This problem can efficiently be approximately solved using the conjugate gradient algorithm, after making a linear approximation to the objective and a quadratic approximation to the constraint.
 
 The theory justifying TRPO actually suggests using a penalty instead of a constraint, i.e., solving the unconstrained optimization problem
 
-$$\underset{\theta}{\text{maximize}} \quad \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)} \hat{A}_t - \beta \, \text{KL}[\pi_{\theta_{\text{old}}}(\cdot \mid s_t), \pi_\theta(\cdot \mid s_t)] \right] \tag{5}$$
+$$
+\underset{\theta}{\operatorname{maximize}} \quad \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)} \, \hat{A}_t - \beta \, \mathrm{KL} \left[ \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t),\, \pi_\theta(\cdot \mid s_t) \right] \right] \tag{5}
+$$
 
 for some coefficient $\beta$. This follows from the fact that a certain surrogate objective (which computes the max KL over states instead of the mean) forms a lower bound (i.e., a pessimistic bound) on the performance of the policy $\pi$. TRPO uses a hard constraint rather than a penalty because it is hard to choose a single value of $\beta$ that performs well across different problems — or even within a single problem, where the characteristics change over the course of learning. Hence, to achieve our goal of a first-order algorithm that emulates the monotonic improvement of TRPO, experiments show that it is not sufficient to simply choose a fixed penalty coefficient $\beta$ and optimize the penalized objective Equation (5) with SGD; additional modifications are required.
 ## 3 Clipped Surrogate Objective
 
 Let $r_t(\theta)$ denote the probability ratio $r_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}$, so $r(\theta_{\text{old}}) = 1$. TRPO maximizes a "surrogate" objective
 
-$$L^{CPI}(\theta) = \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)} \hat{A}_t \right] = \hat{\mathbb{E}}_t \left[ r_t(\theta) \hat{A}_t \right]. \tag{6}$$
+$$
+L^{\mathrm{CPI}}(\theta) = \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)} \, \hat{A}_t \right] = \hat{\mathbb{E}}_t \left[ r_t(\theta) \, \hat{A}_t \right]. \tag{6}
+$$
 
 The superscript $CPI$ refers to conservative policy iteration [KL02], where this objective was proposed. Without a constraint, maximization of $L^{CPI}$ would lead to an excessively large policy update; hence, we now consider how to modify the objective, to penalize changes to the policy that move $r_t(\theta)$ away from 1.
 
 The main objective we propose is the following:
 
-$$L^{CLIP}(\theta) = \hat{\mathbb{E}}_t \left[ \min(r_t(\theta) \hat{A}_t, \text{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon) \hat{A}_t) \right] \tag{7}$$
+$$
+L^{\mathrm{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min \left( r_t(\theta) \, \hat{A}_t,\; \operatorname{clip}(r_t(\theta),\, 1 - \epsilon,\, 1 + \epsilon) \, \hat{A}_t \right) \right] \tag{7}
+$$
 
 where epsilon is a hyperparameter, say, $\epsilon = 0.2$. The motivation for this objective is as follows. The first term inside the min is $L^{CPI}$. The second term, $\text{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon) \hat{A}_t$, modifies the surrogate objective by clipping the probability ratio, which removes the incentive for moving $r_t$ outside of the interval $[1 - \epsilon, 1 + \epsilon]$. Finally, we take the minimum of the clipped and unclipped objective, so the final objective is a lower bound (i.e., a pessimistic bound) on the unclipped objective. With this scheme, we only ignore the change in probability ratio when it would make the objective improve, and we include it when it makes the objective worse. Note that $L^{CLIP}(\theta) = L^{CPI}(\theta)$ to first order around $\theta_{\text{old}}$ (i.e., where $r = 1$), however, they become different as $\theta$ moves away from $\theta_{\text{old}}$. Figure 1 plots a single term (i.e., a single $t$) in $L^{CLIP}$; note that the probability ratio $r$ is clipped at $1 - \epsilon$ or $1 + \epsilon$ depending on whether the advantage is positive or negative.
 
-![Figure 1](../figures_and_tables/figure_1.png)
+![Figure 1](figures_and_tables/figure_1.png)
 
 *Figure 1: Plots showing one term (i.e., a single timestep) of the surrogate function $L^{CLIP}$ as a function of the probability ratio $r$, for positive advantages (left) and negative advantages (right). The red circle on each plot shows the starting point for the optimization, i.e., $r = 1$. Note that $L^{CLIP}$ sums many of these terms.*
 
 Figure 2 provides another source of intuition about the surrogate objective $L^{CLIP}$. It shows how several objectives vary as we interpolate along the policy update direction, obtained by proximal policy optimization (the algorithm we will introduce shortly) on a continuous control problem. We can see that $L^{CLIP}$ is a lower bound on $L^{CPI}$, with a penalty for having too large of a policy update.
-![Figure 2](../figures_and_tables/figure_2.png)
+![Figure 2](figures_and_tables/figure_2.png)
 
 **Figure 2:** Surrogate objectives, as we interpolate between the initial policy parameter $\theta_{old}$ and the updated policy parameter, which we compute after one iteration of PPO. The updated policy has a KL divergence of about 0.02 from the initial policy, and this is the point at which $L^{CLIP}$ is maximal. This plot corresponds to the first policy update on the Hopper-v1 problem, using hyperparameters provided in Section 6.1.
 
@@ -81,7 +95,9 @@ In the simplest instantiation of this algorithm, we perform the following steps 
 
 - Using several epochs of minibatch SGD, optimize the KL-penalized objective
 
-$$L^{KLPEN}(\theta) = \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{old}}(a_t \mid s_t)} \hat{A}_t - \beta \, \text{KL}[\pi_{\theta_{old}}(\cdot \mid s_t), \pi_\theta(\cdot \mid s_t)] \right] \tag{8}$$
+$$
+L^{\mathrm{KLPEN}}(\theta) = \hat{\mathbb{E}}_t \left[ \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)} \, \hat{A}_t - \beta \, \mathrm{KL} \left[ \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t),\, \pi_\theta(\cdot \mid s_t) \right] \right] \tag{8}
+$$
 
 - Compute $d = \hat{\mathbb{E}}_t[\text{KL}[\pi_{\theta_{old}}(\cdot \mid s_t), \pi_\theta(\cdot \mid s_t)]]$
   - If $d < d_{\text{targ}} / 1.5$, $\beta \leftarrow \beta / 2$
@@ -96,23 +112,31 @@ The surrogate losses from the previous sections can be computed and differentiat
 Most techniques for computing variance-reduced advantage-function estimators make use of a learned state-value function $V(s)$; for example, generalized advantage estimation [Sch+15a], or the
 finite-horizon estimators in [Mni+16]. If using a neural network architecture that shares parameters between the policy and value function, we must use a loss function that combines the policy surrogate and a value function error term. This objective can further be augmented by adding an entropy bonus to ensure sufficient exploration, as suggested in past work [Wil92; Mni+16]. Combining these terms, we obtain the following objective, which is (approximately) maximized each iteration:
 
-$$L_t^{CLIP+VF+S}(\theta) = \hat{\mathbb{E}}_t \left[ L_t^{CLIP}(\theta) - c_1 L_t^{VF}(\theta) + c_2 S[\pi_\theta](s_t) \right], \tag{9}$$
+$$
+L_t^{\mathrm{CLIP+VF+S}}(\theta) = \hat{\mathbb{E}}_t \left[ L_t^{\mathrm{CLIP}}(\theta) - c_1 L_t^{\mathrm{VF}}(\theta) + c_2 S[\pi_\theta](s_t) \right], \tag{9}
+$$
 
 where $c_1, c_2$ are coefficients, and $S$ denotes an entropy bonus, and $L_t^{VF}$ is a squared-error loss $(V_\theta(s_t) - V_t^{\text{targ}})^2$.
 
 One style of policy gradient implementation, popularized in [Mni+16] and well-suited for use with recurrent neural networks, runs the policy for $T$ timesteps (where $T$ is much less than the episode length), and uses the collected samples for an update. This style requires an advantage estimator that does not look beyond timestep $T$. The estimator used by [Mni+16] is
 
-$$\hat{A}_t = -V(s_t) + r_t + \gamma r_{t+1} + \cdots + \gamma^{T-t+1} r_{T-1} + \gamma^{T-t} V(s_T) \tag{10}$$
+$$
+\hat{A}_t = -V(s_t) + r_t + \gamma r_{t+1} + \cdots + \gamma^{T-t+1} r_{T-1} + \gamma^{T-t} V(s_T) \tag{10}
+$$
 
 where $t$ specifies the time index in $[0, T]$, within a given length-$T$ trajectory segment. Generalizing this choice, we can use a truncated version of generalized advantage estimation, which reduces to Equation (10) when $\lambda = 1$:
 
-$$\hat{A}_t = \delta_t + (\gamma \lambda) \delta_{t+1} + \cdots + (\gamma \lambda)^{T-t+1} \delta_{T-1}, \tag{11}$$
+$$
+\hat{A}_t = \delta_t + (\gamma \lambda) \delta_{t+1} + \cdots + (\gamma \lambda)^{T-t+1} \delta_{T-1}, \tag{11}
+$$
 
-$$\text{where} \quad \delta_t = r_t + \gamma V(s_{t+1}) - V(s_t) \tag{12}$$
+$$
+\text{where} \quad \delta_t = r_t + \gamma V(s_{t+1}) - V(s_t) \tag{12}
+$$
 
 A proximal policy optimization (PPO) algorithm that uses fixed-length trajectory segments is shown below. Each iteration, each of $N$ (parallel) actors collect $T$ timesteps of data. Then we construct the surrogate loss on these $NT$ timesteps of data, and optimize it with minibatch SGD (or usually for better performance, Adam [KB14]), for $K$ epochs.
 
-![Algorithm 1: PPO, Actor-Critic Style](../figures_and_tables/algorithm_1_ppo_actor_critic.png)
+![Algorithm 1: PPO, Actor-Critic Style](figures_and_tables/algorithm_1_ppo_actor_critic.png)
 
 ## 6 Experiments
 
@@ -135,7 +159,7 @@ Each algorithm was run on all 7 environments, with 3 random seeds on each. We sc
 
 The results are shown in Table 1. Note that the score is negative for the setting without clipping or penalties, because for one environment (half cheetah) it leads to a very negative score, which is worse than the initial random policy.
 
-![Table 1](../figures_and_tables/table_1.png)
+![Table 1](figures_and_tables/table_1.png)
 
 | algorithm | avg. normalized score |
 |---|---|
@@ -164,7 +188,7 @@ $^2$ HalfCheetah, Hopper, InvertedDoublePendulum, InvertedPendulum, Reacher, Swi
 $^3$ After each batch of data, the Adam stepsize is adjusted based on the KL divergence of the original and updated policy, using a rule similar to the one shown in Section 4. An implementation is available at https://github.com/berkeleydeeprlcourse/homework/tree/master/hw4.
 A2C [Mni+16], A2C with trust region [Wan+16]. A2C stands for advantage actor critic, and is a synchronous version of A3C, which we found to have the same or better performance than the asynchronous version. For PPO, we used the hyperparameters from the previous section, with $\epsilon = 0.2$. We see that PPO outperforms the previous methods on almost all the continuous control environments.
 
-![Figure 3: Comparison of several algorithms on several MuJoCo environments, training for one million timesteps.](../figures_and_tables/figure_3_mujoco_comparison.png)
+![Figure 3: Comparison of several algorithms on several MuJoCo environments, training for one million timesteps.](figures_and_tables/figure_3_mujoco_comparison.png)
 
 **Figure 3:** Comparison of several algorithms on several MuJoCo environments, training for one million timesteps.
 
@@ -172,10 +196,10 @@ A2C [Mni+16], A2C with trust region [Wan+16]. A2C stands for advantage actor cri
 
 To showcase the performance of PPO on high-dimensional continuous control problems, we train on a set of problems involving a 3D humanoid, where the robot must run, steer, and get up off the ground, possibly while being pelted by cubes. The three tasks we test on are (1) RoboschoolHumanoid: forward locomotion only, (2) RoboschoolHumanoidFlagrun: position of target is randomly varied every 200 timesteps or whenever the goal is reached, (3) RoboschoolHumanoidFlagrunHarder, where the robot is pelted by cubes and needs to get up off the ground. See Figure 5 for still frames of a learned policy, and Figure 4 for learning curves on the three tasks. Hyperparameters are provided in Table 4. In concurrent work, Heess et al. [Hee+17] used the adaptive KL variant of PPO (Section 4) to learn locomotion policies for 3D robots.
 
-![Figure 4: Learning curves from PPO on 3D humanoid control tasks, using Roboschool.](../figures_and_tables/figure_4_humanoid_learning_curves.png)
+![Figure 4: Learning curves from PPO on 3D humanoid control tasks, using Roboschool.](figures_and_tables/figure_4_humanoid_learning_curves.png)
 
 **Figure 4:** Learning curves from PPO on 3D humanoid control tasks, using Roboschool.
-![Figure 5](../figures_and_tables/figure_5.png)
+![Figure 5](figures_and_tables/figure_5.png)
 
 Figure 5: Still frames of the policy learned from RoboschoolHumanoidFlagrun. In the first six frames, the robot runs towards a target. Then the position is randomly changed, and the robot turns and runs toward the new target.
 
@@ -185,7 +209,7 @@ We also ran PPO on the Arcade Learning Environment [Bel+15] benchmark and compar
 
 A table of results and learning curves for all 49 games is provided in Appendix B. We consider the following two scoring metrics: (1) *average reward per episode over entire training period* (which favors fast learning), and (2) *average reward per episode over last 100 episodes of training* (which favors final performance). Table 2 shows the number of games "won" by each algorithm, where we compute the victor by averaging the scoring metric across three trials.
 
-![Table 2](../figures_and_tables/table_2.png)
+![Table 2](figures_and_tables/table_2.png)
 
 Table 2: Number of games "won" by each algorithm, where the scoring metric is averaged across three trials.
 
@@ -243,7 +267,7 @@ Thanks to Rocky Duan, Peter Chen, and others at OpenAI for insightful comments.
 
 Table 3: PPO hyperparameters used for the Mujoco 1 million timestep benchmark.
 
-![Table 3: Mujoco hyperparameters](../figures_and_tables/table_3_mujoco_hyperparameters.png)
+![Table 3: Mujoco hyperparameters](figures_and_tables/table_3_mujoco_hyperparameters.png)
 
 | Hyperparameter | Value |
 |---|---|
@@ -258,7 +282,7 @@ Table 3: PPO hyperparameters used for the Mujoco 1 million timestep benchmark.
 
 Table 4: PPO hyperparameters used for the Roboschool experiments. Adam stepsize was adjusted based on the target value of the KL divergence.
 
-![Table 4: Roboschool hyperparameters](../figures_and_tables/table_4_roboschool_hyperparameters.png)
+![Table 4: Roboschool hyperparameters](figures_and_tables/table_4_roboschool_hyperparameters.png)
 
 | Hyperparameter | Value |
 |---|---|
@@ -275,15 +299,15 @@ Table 4: PPO hyperparameters used for the Roboschool experiments. Adam stepsize 
 
 Table 5: PPO hyperparameters used in Atari experiments. $\alpha$ is linearly annealed from 1 to 0 over the course of learning.
 
-![Table 5: Atari hyperparameters](../figures_and_tables/table_5_atari_hyperparameters.png)
+![Table 5: Atari hyperparameters](figures_and_tables/table_5_atari_hyperparameters.png)
 
 ## B Performance on More Atari Games
 
 Here we include a comparison of PPO against A2C on a larger collection of 49 Atari games. Figure 6 shows the learning curves of each of three random seeds, while Table 6 shows the mean performance.
-![Figure 6: Comparison of PPO and A2C on all 49 ATARI games included in OpenAI Gym at the time of publication.](../figures_and_tables/figure_6_atari_comparison.png)
+![Figure 6: Comparison of PPO and A2C on all 49 ATARI games included in OpenAI Gym at the time of publication.](figures_and_tables/figure_6_atari_comparison.png)
 
 **Figure 6:** Comparison of PPO and A2C on all 49 ATARI games included in OpenAI Gym at the time of publication.
-![Table 6: Atari Scores](../figures_and_tables/table_6_atari_scores.png)
+![Table 6: Atari Scores](figures_and_tables/table_6_atari_scores.png)
 
 **Table 6:** Mean final scores (last 100 episodes) of PPO and A2C on Atari games after 40M game frames (10M timesteps).
 
